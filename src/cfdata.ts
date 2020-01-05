@@ -6,7 +6,10 @@ import {CompressType} from './cffolder';
 
 import * as zlib from 'zlib';
 
-import {ExtractContext} from "./extract_context";
+import * as LzxModule from './lzx_decoder';
+import * as LzxDecoderNative from './lzx_decoder_native';
+
+import {ExtractContext} from './extract_context';
 
 enum ParseStep {
     HEADER = 0,
@@ -156,9 +159,9 @@ export class CFData {
         if(compressType == CompressType.MSZIP) {
             await this.uncompressMszip(outputSteram);
         }
-        // else if(compressType == CompressType.LZX) {
-        //
-        // }
+        else if(compressType == CompressType.LZX) {
+            await this.uncompressLzx(outputSteram);
+        }
         else{
             throw new Error('Not supported compression type = ' + this._extractContext.folder.typeCompress);
         }
@@ -207,6 +210,26 @@ export class CFData {
             zlibOffset += processed;
             zlibRemaining -= processed;
         }
+    }
+
+    async uncompressLzx(outputStream: streams.Writable) {
+        const lzxContext = await this._extractContext.getLzx();
+        let cur_input: Buffer | undefined = this._compData as Buffer;
+        let result: LzxDecoderNative.Module.ILzxDecoderDecodeOutput;
+
+        do {
+            lzxContext.decoder.cleanupBitstream();
+            result = lzxContext.decoder.decode(cur_input, 1);
+            if (result.result < 0) {
+                throw new Error("LZX Decode failed: " + result.result);
+            }
+            if ((result.result == LzxModule.ARCHIVE_OK) && (result.out_bytes < this._cbUncomp)) {
+                throw new Error("LZX Decode unexcepted decoded size");
+            }
+            lzxContext.decoder.outputBufferTranslation(result.out_bytes, (this._index) * 0x8000);
+            const output = lzxContext.decoder.getOutputBuffer(result.out_bytes);
+            outputStream.write(output);
+        } while(cur_input && result.result == LzxModule.ARCHIVE_EOF);
     }
 }
 
