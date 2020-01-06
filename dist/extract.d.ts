@@ -7,7 +7,7 @@ declare const METHOD_PARSE_HEADER_PAD: unique symbol;
 declare const METHOD_PARSE_FILES: unique symbol;
 declare const METHOD_PARSE_DATAS: unique symbol;
 export interface IExtractListeners {
-    on(event: "entry", listener: (file: CFFile, stream: streams.Readable) => void): this;
+    on(event: "entry", listener: (file: CFFile, stream: streams.Readable, next: () => void) => void): this;
 }
 export declare class Extract extends streams.Writable implements IExtractListeners {
     private _destroyed;
@@ -22,10 +22,8 @@ export declare class Extract extends streams.Writable implements IExtractListene
     private _readFolderIndex;
     private _curFolder;
     private _curCfData;
-    private _curDataStream;
     private _curExtractContext;
     constructor(opts?: any);
-    private getNextFileIndex;
     private [METHOD_PARSE_HEADER];
     private [METHOD_PARSE_FOLDERS];
     private [METHOD_PARSE_HEADER_PAD];

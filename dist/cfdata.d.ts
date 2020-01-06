@@ -1,5 +1,3 @@
-/// <reference types="node" />
-import * as streams from 'stream';
 import ReadBuffer from './read-buffer';
 import { ParseResult } from './internals';
 import { CFHeader } from './cfheader';
@@ -19,7 +17,7 @@ export declare class CFData {
     private _uncompData;
     private _parseStep;
     constructor(cfHeader: CFHeader, extractContext: ExtractContext, index: number);
-    parse(buffer: ReadBuffer, outputSteram: streams.Writable): Promise<ParseResult>;
-    uncompressMszip(outputSteram: streams.Writable): Promise<void>;
+    parse(buffer: ReadBuffer): Promise<ParseResult>;
+    uncompressMszip(): Promise<void>;
 }
 //# sourceMappingURL=cfdata.d.ts.map

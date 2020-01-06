@@ -62,11 +62,64 @@ class EntryStream extends streams.PassThrough {
         return this._meta;
     }
 }
-class DataStream extends streams.PassThrough {
-    constructor() {
-        super();
+class ExtractContextImpl extends extract_context_1.ExtractContext {
+    constructor(target, folder, cffiles) {
+        super(folder);
         this.processing = null;
+        this._target = target;
+        this._cffiles = cffiles;
         this.offset = 0;
+    }
+    getNextFileIndex(prev) {
+        let nextIndex = prev ? (prev.index + 1) : 0;
+        if (nextIndex >= this._cffiles.length) {
+            return -1;
+        }
+        return nextIndex;
+    }
+    consumeData(data) {
+        return new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
+            try {
+                const reader = new read_buffer_1.default(data);
+                do {
+                    let prepareNext = false;
+                    let currentMeta = null;
+                    if (this.processing) {
+                        const cur = this.processing;
+                        const entryRemaining = cur.remaining;
+                        const avail = reader.remaining < entryRemaining ? reader.remaining : entryRemaining;
+                        const partial = reader.readBuffer(avail);
+                        cur.write(partial);
+                        cur.meta.offset += avail;
+                        currentMeta = cur.meta;
+                        if (cur.remaining == 0) {
+                            cur.end();
+                            yield cur.meta.nextPromise;
+                            prepareNext = true;
+                        }
+                    }
+                    else {
+                        prepareNext = true;
+                    }
+                    if (prepareNext) {
+                        const nextIndex = this.getNextFileIndex(currentMeta);
+                        if (nextIndex < 0) {
+                            break;
+                        }
+                        const file = this._cffiles[nextIndex];
+                        const cur = this.processing = new EntryStream();
+                        yield this.processing.init(nextIndex, file.cbFile);
+                        this._target.emit('entry', file, this.processing, () => {
+                            cur.meta.next.resolve();
+                        });
+                    }
+                } while (this.processing && (reader.remaining > 0));
+                resolve();
+            }
+            catch (e) {
+                reject(e);
+            }
+        }));
     }
 }
 class Extract extends streams.Writable {
@@ -76,7 +129,6 @@ class Extract extends streams.Writable {
         this._partial = false;
         this._readFolderIndex = -1;
         this._curFolder = null;
-        this._curDataStream = null;
         this._destroyed = false;
         this._partial = false;
         this._totalReadBytes = 0;
@@ -90,13 +142,6 @@ class Extract extends streams.Writable {
             this[METHOD_PARSE_DATAS].bind(this)
         ];
         this._buffer = null;
-    }
-    getNextFileIndex(prev) {
-        let nextIndex = prev ? (prev.index + 1) : 0;
-        if (nextIndex >= this._cffiles.length) {
-            return -1;
-        }
-        return nextIndex;
     }
     [METHOD_PARSE_HEADER](buffer) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -188,51 +233,12 @@ class Extract extends streams.Writable {
                     }
                 }
                 this._curFolder = folder;
-                this._curExtractContext = new extract_context_1.ExtractContext(folder);
+                this._curExtractContext = new ExtractContextImpl(this, folder, this._cffiles.filter(v => v.iFolder == index));
                 this._curCfData = new cfdata_1.CFData(this._cfheader, this._curExtractContext, this._curExtractContext.dataCount);
-                const dataStream = this._curDataStream = new DataStream();
-                this._curDataStream.on('data', (data) => {
-                    const reader = new read_buffer_1.default(data);
-                    do {
-                        let prepareNext = false;
-                        let currentMeta = null;
-                        if (dataStream.processing) {
-                            const cur = dataStream.processing;
-                            const entryRemaining = cur.remaining;
-                            const avail = reader.remaining < entryRemaining ? reader.remaining : entryRemaining;
-                            const partial = reader.readBuffer(avail);
-                            cur.write(partial);
-                            cur.meta.offset += avail;
-                            currentMeta = cur.meta;
-                            if (cur.remaining == 0) {
-                                cur.end();
-                                // await cur.meta.nextPromise;
-                                prepareNext = true;
-                            }
-                        }
-                        else {
-                            prepareNext = true;
-                        }
-                        if (prepareNext) {
-                            const nextIndex = this.getNextFileIndex(currentMeta);
-                            if (nextIndex < 0) {
-                                break;
-                            }
-                            const file = this._cffiles[nextIndex];
-                            const cur = dataStream.processing = new EntryStream();
-                            /* await */ dataStream.processing.init(nextIndex, file.cbFile);
-                            this.emit('entry', file, dataStream.processing, () => {
-                                // if(cur.meta.next) {
-                                //     cur.meta.next.resolve();
-                                // }
-                            });
-                        }
-                    } while (dataStream.processing && (reader.remaining > 0));
-                });
                 return Promise.resolve(internals_1.ParseResult.RERUN);
             }
             else {
-                const res = yield this._curCfData.parse(buffer, this._curDataStream);
+                const res = yield this._curCfData.parse(buffer);
                 if (res == internals_1.ParseResult.DONE) {
                     this._curExtractContext.dataCount++;
                     if (this._curExtractContext.dataCount == this._curExtractContext.folder.cCFData) {
@@ -301,7 +307,6 @@ class Extract extends streams.Writable {
                 callback();
             }
             catch (err) {
-                console.log('CATCH ERROR', err);
                 this.emit('error', err);
             }
         }))();
