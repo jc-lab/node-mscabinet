@@ -5,7 +5,7 @@ import {CFHeader} from './cfheader';
 import {CFFolder} from './cffolder';
 import {CFFile} from './cffile';
 import {CFData} from './cfdata';
-import {ExtractContext} from "./extract_context";
+import {ExtractContext} from './extract_context';
 
 const METHOD_PARSE_HEADER = Symbol('PARSE_HEADER');
 const METHOD_PARSE_FOLDERS = Symbol('PARSE_FOLDERS');
@@ -19,8 +19,8 @@ interface IProcessFileData {
     index: number;
     size: number;
     offset: number;
-    nextPromise?: Promise<void>;
-    next?: {
+    nextPromise: Promise<void>;
+    next: {
         resolve: () => void,
         reject: () => void
     }
@@ -38,7 +38,7 @@ class EntryStream extends streams.PassThrough {
             index,
             size,
             offset: 0
-        };
+        } as IProcessFileData;
         this._meta = meta;
         return new Promise((resolve, reject) => {
             meta.nextPromise = new Promise<void>((next_resolve, next_reject) => {
@@ -60,18 +60,74 @@ class EntryStream extends streams.PassThrough {
     }
 }
 
-class DataStream extends streams.PassThrough {
+class ExtractContextImpl extends ExtractContext {
+    private _target: NodeJS.EventEmitter;
+    private _cffiles: CFFile[];
+
     public offset: number;
     public processing: EntryStream | null = null;
 
-    constructor() {
-        super();
+    constructor(target: NodeJS.EventEmitter, folder: CFFolder, cffiles: CFFile[]) {
+        super(folder);
+        this._target = target;
+        this._cffiles = cffiles;
         this.offset = 0;
+    }
+
+    private getNextFileIndex(prev: IProcessFileData | null): number {
+        let nextIndex = prev ? (prev.index + 1) : 0;
+        if(nextIndex >= this._cffiles.length) {
+            return -1;
+        }
+        return nextIndex;
+    }
+
+    public consumeData(data: Buffer): Promise<void> {
+        return new Promise<void>( async(resolve, reject) => {
+            try {
+                const reader = new ReadBuffer(data);
+                do {
+                    let prepareNext = false;
+                    let currentMeta: IProcessFileData | null = null;
+                    if (this.processing) {
+                        const cur = this.processing;
+                        const entryRemaining = cur.remaining;
+                        const avail = reader.remaining < entryRemaining ? reader.remaining : entryRemaining;
+                        const partial = reader.readBuffer(avail);
+                        cur.write(partial);
+                        cur.meta.offset += avail;
+                        currentMeta = cur.meta;
+                        if (cur.remaining == 0) {
+                            cur.end();
+                            await cur.meta.nextPromise;
+                            prepareNext = true;
+                        }
+                    } else {
+                        prepareNext = true;
+                    }
+                    if (prepareNext) {
+                        const nextIndex = this.getNextFileIndex(currentMeta);
+                        if(nextIndex < 0) {
+                            break;
+                        }
+                        const file = this._cffiles[nextIndex];
+                        const cur = this.processing = new EntryStream();
+                        await this.processing.init(nextIndex, file.cbFile);
+                        this._target.emit('entry', file, this.processing, () => {
+                            cur.meta.next.resolve();
+                        });
+                    }
+                } while (this.processing && (reader.remaining > 0));
+                resolve();
+            }catch (e) {
+                reject(e);
+            }
+        });
     }
 }
 
 export interface IExtractListeners {
-    on(event: "entry", listener: (file: CFFile, stream: streams.Readable) => void): this;
+    on(event: "entry", listener: (file: CFFile, stream: streams.Readable, next: () => void) => void): this;
 }
 
 export class Extract extends streams.Writable implements IExtractListeners {
@@ -91,8 +147,7 @@ export class Extract extends streams.Writable implements IExtractListeners {
     private _curFolder: CFFolder | null = null;
 
     private _curCfData!: CFData;
-    private _curDataStream: DataStream | null = null;
-    private _curExtractContext!: ExtractContext;
+    private _curExtractContext!: ExtractContextImpl;
 
     constructor(opts?: any) {
         super(opts);
@@ -109,14 +164,6 @@ export class Extract extends streams.Writable implements IExtractListeners {
             this[METHOD_PARSE_DATAS].bind(this)
         ];
         this._buffer = null;
-    }
-
-    private getNextFileIndex(prev: IProcessFileData | null): number {
-        let nextIndex = prev ? (prev.index + 1) : 0;
-        if(nextIndex >= this._cffiles.length) {
-            return -1;
-        }
-        return nextIndex;
     }
 
     private async [METHOD_PARSE_HEADER](buffer: ReadBuffer): Promise<ParseResult> {
@@ -202,49 +249,11 @@ export class Extract extends streams.Writable implements IExtractListeners {
                 }
             }
             this._curFolder = folder;
-            this._curExtractContext = new ExtractContext(folder);
+            this._curExtractContext = new ExtractContextImpl(this, folder, this._cffiles.filter(v => v.iFolder == index));
             this._curCfData = new CFData(this._cfheader, this._curExtractContext, this._curExtractContext.dataCount);
-            const dataStream = this._curDataStream = new DataStream();
-            this._curDataStream.on('data', (data) => {
-                const reader = new ReadBuffer(data);
-                do {
-                    let prepareNext = false;
-                    let currentMeta: IProcessFileData | null = null;
-                    if (dataStream.processing) {
-                        const cur = dataStream.processing;
-                        const entryRemaining = cur.remaining;
-                        const avail = reader.remaining < entryRemaining ? reader.remaining : entryRemaining;
-                        const partial = reader.readBuffer(avail);
-                        cur.write(partial);
-                        cur.meta.offset += avail;
-                        currentMeta = cur.meta;
-                        if (cur.remaining == 0) {
-                            cur.end();
-                            // await cur.meta.nextPromise;
-                            prepareNext = true;
-                        }
-                    } else {
-                        prepareNext = true;
-                    }
-                    if (prepareNext) {
-                        const nextIndex = this.getNextFileIndex(currentMeta);
-                        if(nextIndex < 0) {
-                            break;
-                        }
-                        const file = this._cffiles[nextIndex];
-                        const cur = dataStream.processing = new EntryStream();
-                        /* await */ dataStream.processing.init(nextIndex, file.cbFile);
-                        this.emit('entry', file, dataStream.processing, () => {
-                            // if(cur.meta.next) {
-                            //     cur.meta.next.resolve();
-                            // }
-                        });
-                    }
-                } while (dataStream.processing && (reader.remaining > 0));
-            });
             return Promise.resolve(ParseResult.RERUN);
         }else{
-            const res = await this._curCfData.parse(buffer, this._curDataStream as DataStream);
+            const res = await this._curCfData.parse(buffer);
             if(res == ParseResult.DONE) {
                 this._curExtractContext.dataCount++;
                 if(this._curExtractContext.dataCount == this._curExtractContext.folder.cCFData) {
@@ -313,7 +322,6 @@ export class Extract extends streams.Writable implements IExtractListeners {
                 }
                 callback();
             } catch(err) {
-                console.log('CATCH ERROR', err);
                 this.emit('error', err);
             }
         })();

@@ -89,7 +89,7 @@ export class CFData {
         this._index = index;
     }
 
-    public async parse(buffer: ReadBuffer, outputSteram: streams.Writable): Promise<ParseResult> {
+    public async parse(buffer: ReadBuffer): Promise<ParseResult> {
         switch (this._parseStep) {
             case ParseStep.HEADER:
                 if (buffer.remaining < 8) {
@@ -154,7 +154,7 @@ export class CFData {
         const compressType = (this._extractContext.folder.typeCompress & 0x00ff);
 
         if(compressType == CompressType.MSZIP) {
-            await this.uncompressMszip(outputSteram);
+            await this.uncompressMszip();
         }
         // else if(compressType == CompressType.LZX) {
         //
@@ -165,7 +165,7 @@ export class CFData {
         return Promise.resolve(ParseResult.DONE);
     }
 
-    async uncompressMszip(outputSteram: streams.Writable) {
+    async uncompressMszip() {
         const compData = this._compData as Buffer;
         const sig = compData.readUInt16LE(0);
         if(sig != MSZIP_SIGNATURE) {
@@ -175,6 +175,7 @@ export class CFData {
         let zlibRemaining = compData.length - 2;
         while(zlibRemaining > 0) {
             const buf = BufferToBuffer(compData, zlibOffset, zlibRemaining);
+            let totalBuffer: Buffer | null = null;
             const processed = await new Promise<number>((resolve, reject) => {
                 let written = 0;
                 const dictionary = this._extractContext.getMszip().dictionary;
@@ -199,11 +200,18 @@ export class CFData {
                             this._uncompData = data;
                         }
                         written += data.length;
-                        outputSteram.write(data);
+                        if(totalBuffer) {
+                            totalBuffer = Buffer.concat([totalBuffer, data]);
+                        }else{
+                            totalBuffer = data;
+                        }
                     });
                 inflate.write(buf);
                 inflate.end();
             });
+            if(totalBuffer) {
+                await this._extractContext.consumeData(totalBuffer);
+            }
             zlibOffset += processed;
             zlibRemaining -= processed;
         }

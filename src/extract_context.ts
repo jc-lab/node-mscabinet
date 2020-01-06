@@ -4,7 +4,7 @@ interface IMszipContext {
     dictionary: Buffer | null;
 }
 
-export class ExtractContext {
+export abstract class ExtractContext {
     private folder_: CFFolder;
     public dataCount: number = 0;
     private mszip_: IMszipContext | null = null;
@@ -25,4 +25,6 @@ export class ExtractContext {
         }
         return this.mszip_;
     }
+
+    abstract consumeData(data: Buffer): Promise<void>;
 }
