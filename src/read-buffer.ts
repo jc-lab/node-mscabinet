@@ -44,6 +44,7 @@ export default class ReadBuffer {
     readIntLE(byteLength: number): number {
         const out = this._buffer.readIntLE(this._offset, byteLength);
         this._offset += byteLength;
+        if(this._afterReadHandler) this._afterReadHandler(byteLength);
         return out;
     }
 
@@ -123,10 +124,9 @@ export default class ReadBuffer {
     }
 
     readBuffer(byteLength: number): Buffer {
-        const dest = Buffer.alloc(byteLength);
-        this._buffer.copy(dest, 0, this.offset, this.offset + byteLength);
-        this._offset += byteLength;
-        if(this._afterReadHandler) this._afterReadHandler(byteLength);
+        const dest = this._buffer.subarray(this.offset, this.offset + byteLength);
+        this._offset += dest.length;
+        if(this._afterReadHandler) this._afterReadHandler(dest.length);
         return dest;
     }
 
@@ -158,8 +158,7 @@ export default class ReadBuffer {
     }
 
     readRemainingBuffer(): Buffer {
-        const dest = Buffer.alloc(this.remaining);
-        this._buffer.copy(dest, 0, this.offset, dest.length);
+        const dest = this._buffer.subarray(this.offset, this._limit);
         this._offset += dest.length;
         if(this._afterReadHandler) this._afterReadHandler(dest.length);
         return dest;
@@ -170,8 +169,6 @@ export default class ReadBuffer {
     }
 
     getFooterBuffer(): Buffer {
-        const dest = Buffer.alloc(this.footerSize);
-        this._buffer.copy(dest, 0, this._limit, dest.length);
-        return dest;
+        return this._buffer.subarray(this._limit, this._buffer.length);
     }
 }
