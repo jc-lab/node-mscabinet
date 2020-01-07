@@ -146,7 +146,7 @@ export class CFData {
 
         this._computedCsum = computeCsum(this._checkBuffer, 0) & 0xffffffff;
         if(this._csum && this._csum != this._computedCsum) {
-            throw new Error('Checksum error');
+            throw new Error(`Checksum error: ${this._csum} != ${this._computedCsum} // `);
         }
         if(!this._compData) {
             return Promise.resolve(ParseResult.DONE);

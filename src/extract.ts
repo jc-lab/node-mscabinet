@@ -30,7 +30,9 @@ class EntryStream extends streams.PassThrough {
     public _meta!: IProcessFileData;
 
     constructor() {
-        super();
+        super({
+            autoDestroy: true
+        });
     }
 
     async init(index: number, size: number) {
@@ -94,7 +96,7 @@ class ExtractContextImpl extends ExtractContext {
                         const entryRemaining = cur.remaining;
                         const avail = reader.remaining < entryRemaining ? reader.remaining : entryRemaining;
                         const partial = reader.readBuffer(avail);
-                        cur.write(partial);
+                        cur.push(partial);
                         cur.meta.offset += avail;
                         currentMeta = cur.meta;
                         if (cur.remaining == 0) {
