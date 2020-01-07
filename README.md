@@ -15,8 +15,8 @@ fs.createReadStream('input.cab').pipe(extract)
         const dirname = path.dirname(target);
         fs.mkdirSync(dirname, {recursive: true});
         stream
-            .pipe(fs.createWriteStream(target))
-            .on('finish', () => next());
+            .on('finish', () => next())
+            .pipe(fs.createWriteStream(target));
     })
     .on('close', () => {
         console.log("ONCLOSE");
