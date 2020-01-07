@@ -1,6 +1,6 @@
 {
   "name": "mscabinet",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -37,5 +37,8 @@
     "url": "https://github.com/jc-lab/node-mscabinet/issues"
   },
   "homepage": "https://github.com/jc-lab/node-mscabinet#readme",
-  "description": ""
+  "description": "",
+  "files": [
+    "dist"
+  ]
 }
